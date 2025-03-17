@@ -1,28 +1,22 @@
-# ベースイメージとしてPythonを使用
+# Pythonの軽量イメージを使用
 FROM python:3.9-slim
 
 # 作業ディレクトリを設定
 WORKDIR /app
 
 # 必要なパッケージをインストール
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 依存関係をインストール
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションのソースコードをコピー
-COPY . ./app
-
-# 環境変数の設定
-ENV FLASK_APP=app.py
-ENV FLASK_RUN_HOST=0.0.0.0
+COPY . /app
 
 # ポートを公開
-EXPOSE 5000
+EXPOSE 8080
 
 # Flaskアプリケーションを起動（gunicornを使う）
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-b", "127.0.0.1:8080", "app.app:app"]
