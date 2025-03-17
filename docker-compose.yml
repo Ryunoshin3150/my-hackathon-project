@@ -7,4 +7,5 @@ services:
     volumes:
       - .:/app
     environment:
-      FLASK_ENV: development
+      FLASK_ENV: production  # 本番環境向けに変更
+      PORT: 8080
