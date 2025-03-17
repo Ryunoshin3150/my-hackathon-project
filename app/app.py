@@ -57,5 +57,4 @@ def extract_category(text):
             return category
     return None
 
-if __name__ == '__main__':
-    app.run(debug=True)
+
