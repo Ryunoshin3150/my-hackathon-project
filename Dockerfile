@@ -24,6 +24,5 @@ ENV FLASK_RUN_HOST=0.0.0.0
 # ポートを公開
 EXPOSE 5000
 
-# Flaskアプリケーションを起動
-CMD ["flask", "run"]
-
+# Flaskアプリケーションを起動（gunicornを使う）
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
