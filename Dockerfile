@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションのソースコードをコピー
-COPY . .
+COPY . ./app
 
 # 環境変数の設定
 ENV FLASK_APP=app.py
