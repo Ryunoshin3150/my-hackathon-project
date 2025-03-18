@@ -1,4 +1,5 @@
 import os
+import uuid
 import google.generativeai as genai
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -6,6 +7,7 @@ import firebase_admin
 from firebase_admin import credentials, storage, firestore
 from datetime import datetime
 from flask_cors import CORS
+from flask_swagger_ui import get_swaggerui_blueprint
 
 # .envの読み込み
 load_dotenv()
@@ -17,7 +19,7 @@ CORS(app)
 
 # Firebaseの設定
 FIREBASE_CREDENTIALS = "firebase_credentials.json"  # Firebaseの鍵ファイル
-FIREBASE_BUCKET = "smilephoto-7fef0.firebasestorage.app" # Firebase Storageのバケット名
+FIREBASE_BUCKET = "smilephoto-7fef0.firebasestorage.app"  # Firebase Storageのバケット名
 
 # Firebase 初期化
 cred = credentials.Certificate(FIREBASE_CREDENTIALS)
@@ -25,13 +27,25 @@ firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_BUCKET})
 bucket = storage.bucket()
 db = firestore.client()  # Firestoreクライアント
 
-
 # Gemini API 設定
 genai.configure(api_key=API_KEY)
 
+# FirestoreのドキュメントID（固定）
+DOCUMENT_ID = "12345678910"
+
 # 分類フォルダ
 CATEGORIES = ["smile", "funny", "straight", "crying"]
-DOCUMENT_ID = "12345678910"  # Firestore のドキュメントID
+
+SWAGGER_URL = "/api/docs"
+API_URL = "/static/swagger.yml"
+
+# Call factory function to create our blueprint
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+)
+
+app.register_blueprint(swaggerui_blueprint)
 
 def extract_category(text):
     """Gemini APIの応答からカテゴリを抽出する"""
@@ -51,88 +65,129 @@ def save_to_firebase_storage(image_bytes, category):
 
     return blob.public_url
 
-def save_to_firestore(image_url, category):
-    """Firestore のドキュメントに画像の URL を追加"""
+def save_album_title(album_id, title):
+    """Firestore の `Albums` コレクションにアルバムタイトルを保存"""
+    doc_ref = db.collection("Albums").document(DOCUMENT_ID)
+
+    # 既存のデータを取得
+    doc = doc_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+    else:
+        data = {"title": {}}  # タイトルを格納するフィールドを作る
+
+    data["title"][album_id] = title  # 自動生成されたアルバムIDをキーにする
+    doc_ref.set(data)  # Firestoreに更新
+
+def save_to_photos(image_url, category, album_id):
+    """Firestore の `Photos` コレクションに画像のURLを保存"""
     doc_ref = db.collection("Photos").document(DOCUMENT_ID)
-    
+
     # 既存のデータを取得（なければ空の辞書）
     doc = doc_ref.get()
     if doc.exists:
         data = doc.to_dict()
     else:
-        data = {}
+        data = {"albums": {}}  # albums フィールドを作成
+
+    # アルバムが存在しなければ作成
+    album_id = str(album_id)
+    if album_id not in data["albums"]:
+        data["albums"][album_id] = {category: [] for category in CATEGORIES}
 
     # 感情カテゴリーごとにURLを追加
-    if category not in data:
-        data[category] = []
-    
-    data[category].append(image_url)
+    data["albums"][album_id][category].append(image_url)
     doc_ref.set(data)  # Firestoreに更新
 
 @app.route('/upload', methods=['POST'])
-def upload_image():
-    if 'image' not in request.files:
-        return jsonify({"status": "error", "message": "No image file provided"}), 400
+def upload_images():
+    """アルバムタイトルを登録し、複数の画像を受け取って処理"""
+    if 'title' not in request.form:
+        return jsonify({"status": "error"}), 400
 
-    file = request.files['image']
-    image_bytes = file.read()
+    title = request.form['title']
+
+    # 🔥 アルバムIDをUUIDで自動生成
+    album_id = str(uuid.uuid4())[:8]  # 短縮して8桁のIDにする
+
+    # **🔥 アルバムタイトルを Firestore に保存**
+    save_album_title(album_id, title)
+
+    if 'images' not in request.files:
+        return jsonify({"status": "error"}), 400
+
+    files = request.files.getlist('images')  # 🔥 複数の画像を受け取る
 
     try:
-        # Gemini API で感情分析
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = "この画像の感情を分析し、'smile', 'glad', 'straight', 'crying' のいずれかに分類し、その中の単語１つのみを返してください（ex. smile）"
-        response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": image_bytes}])
+        for file in files:
+            image_bytes = file.read()
 
-        category = extract_category(response.text)
+            # **🔥 Gemini API で感情分析**
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = "この画像の感情を分析し、'smile', 'funny', 'straight', 'crying' のいずれかに分類し、その中の単語１つのみを返してください（ex. smile）"
+            response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": image_bytes}])
 
-        # Firebase Storage にアップロード
-        image_url = save_to_firebase_storage(image_bytes, category)
+            category = extract_category(response.text)
 
-        # Firestore にデータを保存
-        save_to_firestore(image_url, category)
+            # **🔥 Firebase Storage にアップロード**
+            image_url = save_to_firebase_storage(image_bytes, category)
 
-        return jsonify({"status": "success", "category": category, "image_url": image_url})
+            # **🔥 Firestore にデータを保存**
+            save_to_photos(image_url, category, album_id)
 
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # 🔥 成功時は `status` のみ返す
+        return jsonify({"status": "success"})
 
-@app.route('/images/<category>', methods=['GET'])
-def get_images(category):
-    """Firestore から特定の感情の画像一覧を取得"""
-    try:
-        doc_ref = db.collection("Photos").document(DOCUMENT_ID)
-        doc = doc_ref.get()
-        
-        if doc.exists:
-            data = doc.to_dict()
-            image_urls = data.get(category, [])
-        else:
-            image_urls = []
+    except Exception:
+        return jsonify({"status": "error"}), 500
 
-        return jsonify({"status": "success", "category": category, "images": image_urls})
 
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/images/all', methods=['GET'])
-def get_all_images():
-    """Firestore からすべてのカテゴリの画像を取得"""
+@app.route('/images/<album_id>/<category>', methods=['GET'])
+def get_images_by_album_and_category(album_id, category):
+    """Firestore から指定アルバムの特定の感情の画像一覧を取得"""
     try:
         doc_ref = db.collection("Photos").document(DOCUMENT_ID)
         doc = doc_ref.get()
-        
-        # Firestore にデータが存在する場合
+
         if doc.exists:
             data = doc.to_dict()
+            albums = data.get("albums", {})
+
+            # 指定した `album_id` のデータを取得
+            album_data = albums.get(str(album_id), {})
+
+            # 指定カテゴリの画像URLを取得（存在しない場合は空リスト）
+            image_urls = album_data.get(category, [])
+
+            return jsonify({
+                "status": "success",
+                "album_id": album_id,
+                "category": category,
+                "images": image_urls
+            })
+
         else:
-            data = {}
+            return jsonify({"status": "error"}), 404  # アルバムが見つからなかった場合
 
-        # すべてのカテゴリの画像を取得
-        all_images = {}
-        for category in CATEGORIES:
-            all_images[category] = data.get(category, [])  # もしなければ空リスト
+    except Exception:
+        return jsonify({"status": "error"}), 500
 
-        return jsonify({"status": "success", "images": all_images})
+
+@app.route('/images/<album_id>/all', methods=['GET'])
+def get_all_images_by_album(album_id):
+    """Firestore から指定アルバムのすべてのカテゴリの画像を取得"""
+    try:
+        doc_ref = db.collection("Photos").document(DOCUMENT_ID)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            data = doc.to_dict()
+            albums = data.get("albums", {})
+            all_images = albums.get(str(album_id), {category: [] for category in CATEGORIES})
+        else:
+            all_images = {category: [] for category in CATEGORIES}  # デフォルトの空リスト
+
+        return jsonify({"status": "success", "album_id": album_id, "images": all_images})
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -140,6 +195,3 @@ def get_all_images():
 @app.route('/', methods=['GET'])
 def root():
     return jsonify({'message': 'Hello, world!'})
-
-
-

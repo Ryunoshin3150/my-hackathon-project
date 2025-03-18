@@ -1,0 +1,195 @@
+openapi: 3.0.0
+info:
+  title: SmilePhoto API
+  description: "感情分析による画像分類API。Firebase FirestoreとStorageを活用して、画像をアップロードし、分類・取得する機能を提供。"
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:5000
+    description: ローカル開発サーバー
+
+paths:
+  /upload:
+    post:
+      summary: 画像とアルバム情報をアップロード
+      description: "画像をアップロードし、感情分析を実施してFirebase Storageへ保存。Firestoreにアルバム情報と画像URLを登録する。"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: "アルバムのタイトル"
+                  example: "旅行の思い出"
+                date:
+                  type: string
+                  format: date
+                  description: "アルバムの日付 (YYYY-MM-DD)"
+                  example: "2024-03-18"
+                images:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: "アップロードする画像（複数可）"
+      responses:
+        "200":
+          description: "アップロード成功"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "success"
+                  album_id:
+                    type: string
+                    example: "abcd1234"
+                  title:
+                    type: string
+                    example: "旅行の思い出"
+                  date:
+                    type: string
+                    example: "2024-03-18"
+                  uploaded_images:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category:
+                          type: string
+                          example: "smile"
+                        url:
+                          type: string
+                          format: uri
+                          example: "https://storage.example.com/photo1.jpg"
+        "400":
+          description: "リクエストエラー（パラメータ不足）"
+        "500":
+          description: "サーバーエラー"
+
+  /images/{album_id}/{category}:
+    get:
+      summary: 指定アルバムの特定の感情カテゴリの画像を取得
+      description: "Firestoreから指定したアルバムの感情分類された画像リストを取得"
+      parameters:
+        - in: path
+          name: album_id
+          required: true
+          schema:
+            type: string
+          description: "取得するアルバムのID"
+          example: "abcd1234"
+        - in: path
+          name: category
+          required: true
+          schema:
+            type: string
+            enum: ["smile", "funny", "straight", "crying"]
+          description: "取得する感情カテゴリ"
+          example: "smile"
+      responses:
+        "200":
+          description: "取得成功"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "success"
+                  album_id:
+                    type: string
+                    example: "abcd1234"
+                  category:
+                    type: string
+                    example: "smile"
+                  images:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                      example: "https://storage.example.com/photo1.jpg"
+        "400":
+          description: "リクエストエラー"
+        "500":
+          description: "サーバーエラー"
+
+  /images/{album_id}/all:
+    get:
+      summary: 指定アルバムのすべての画像を取得
+      description: "Firestoreから指定アルバムのすべての感情カテゴリの画像を取得"
+      parameters:
+        - in: path
+          name: album_id
+          required: true
+          schema:
+            type: string
+          description: "取得するアルバムのID"
+          example: "abcd1234"
+      responses:
+        "200":
+          description: "取得成功"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "success"
+                  album_id:
+                    type: string
+                    example: "abcd1234"
+                  images:
+                    type: object
+                    properties:
+                      smile:
+                        type: array
+                        items:
+                          type: string
+                          format: uri
+                          example: "https://storage.example.com/photo1.jpg"
+                      funny:
+                        type: array
+                        items:
+                          type: string
+                          format: uri
+                          example: "https://storage.example.com/photo2.jpg"
+                      straight:
+                        type: array
+                        items:
+                          type: string
+                          format: uri
+                          example: "https://storage.example.com/photo3.jpg"
+                      crying:
+                        type: array
+                        items:
+                          type: string
+                          format: uri
+                          example: "https://storage.example.com/photo4.jpg"
+        "400":
+          description: "リクエストエラー"
+        "500":
+          description: "サーバーエラー"
+
+  /:
+    get:
+      summary: APIが動作しているか確認
+      description: "サーバーのステータスをチェック"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Hello, world!"
