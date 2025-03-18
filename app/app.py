@@ -25,6 +25,7 @@ firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_BUCKET})
 bucket = storage.bucket()
 db = firestore.client()  # Firestoreクライアント
 
+
 # Gemini API 設定
 genai.configure(api_key=API_KEY)
 
@@ -99,7 +100,7 @@ def upload_image():
 def get_images(category):
     """Firestore から特定の感情の画像一覧を取得"""
     try:
-        doc_ref = db.collection("photos").document(DOCUMENT_ID)
+        doc_ref = db.collection("Photos").document(DOCUMENT_ID)
         doc = doc_ref.get()
         
         if doc.exists:
@@ -109,6 +110,29 @@ def get_images(category):
             image_urls = []
 
         return jsonify({"status": "success", "category": category, "images": image_urls})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/images/all', methods=['GET'])
+def get_all_images():
+    """Firestore からすべてのカテゴリの画像を取得"""
+    try:
+        doc_ref = db.collection("Photos").document(DOCUMENT_ID)
+        doc = doc_ref.get()
+        
+        # Firestore にデータが存在する場合
+        if doc.exists:
+            data = doc.to_dict()
+        else:
+            data = {}
+
+        # すべてのカテゴリの画像を取得
+        all_images = {}
+        for category in CATEGORIES:
+            all_images[category] = data.get(category, [])  # もしなければ空リスト
+
+        return jsonify({"status": "success", "images": all_images})
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
