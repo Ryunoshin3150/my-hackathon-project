@@ -101,20 +101,18 @@ def save_to_photos(image_url, category, album_id):
 
 @app.route('/upload', methods=['POST'])
 def upload_images():
-    """アルバムタイトルを登録し、複数の画像を受け取って処理"""
-    if 'title' not in request.form:
-        return jsonify({"status": "error"}), 400
+    """イベント ID をキーにして画像を Firestore に保存"""
+    if 'title' not in request.form or 'id' not in request.form:
+        return jsonify({"status": "error", "message": "title または id が不足"}), 400
 
     title = request.form['title']
-
-    # 🔥 アルバムIDをUUIDで自動生成
-    album_id = str(uuid.uuid4())[:8]  # 短縮して8桁のIDにする
+    event_id = request.form['id']  # 受け取ったイベント ID
 
     # **🔥 アルバムタイトルを Firestore に保存**
-    save_album_title(album_id, title)
+    save_album_title(event_id, title)
 
     if 'images' not in request.files:
-        return jsonify({"status": "error"}), 400
+        return jsonify({"status": "error", "message": "画像がありません"}), 400
 
     files = request.files.getlist('images')  # 🔥 複数の画像を受け取る
 
@@ -132,15 +130,41 @@ def upload_images():
             # **🔥 Firebase Storage にアップロード**
             image_url = save_to_firebase_storage(image_bytes, category)
 
-            # **🔥 Firestore にデータを保存**
-            save_to_photos(image_url, category, album_id)
+            # **🔥 Firestore にデータを保存（イベント ID ごとに保存）**
+            save_to_photos(image_url, category, event_id)
 
         # 🔥 成功時は `status` のみ返す
         return jsonify({"status": "success"})
 
-    except Exception:
-        return jsonify({"status": "error"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/albums', methods=['GET'])
+def get_albums():
+    """Firestore からアルバムの一覧を取得し、album_id と album名のセットを返す"""
+    try:
+        doc_ref = db.collection("Albums").document(DOCUMENT_ID)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            data = doc.to_dict()
+            album_titles = data.get("title", {})  # 🔥 Firestore の title フィールドを取得
+
+            # 🔥 album_id と album名 のセットをリスト化
+            albums_list = [{"album_id": album_id, "title": title} for album_id, title in album_titles.items()]
+
+            return jsonify({
+                "status": "success",
+                "albums": albums_list
+            })
+        else:
+            return jsonify({
+                "status": "success",
+                "albums": []
+            })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/images/<album_id>/<category>', methods=['GET'])
 def get_images_by_album_and_category(album_id, category):
