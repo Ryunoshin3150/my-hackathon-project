@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y build-essential \
 
 # 依存関係をインストール
 COPY requirements.txt .
+COPY firebase_credentials.json /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションのソースコードをコピー（venvを除外）
